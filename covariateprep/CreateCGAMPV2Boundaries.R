@@ -16,6 +16,7 @@ library(tidyverse) #basic data wrangling
 library(terra) #basic raster handling
 library(sf) #basic shapefile handling
 library(rnaturalearth) #accessing country boundaries
+library(dplyr)
 
 #2. Load BCR shapefile and Central Grasslands Roadmap shapefile
 st_layers("gis/BCRs.gdb")
@@ -57,3 +58,46 @@ bcr.buff |> select(bcr_label, bcr_label_name) |>
 
 writeRaster(cgamp.ras, "gis/CGAMPV2_boundaries/CGAMPV2_rasterTemplate.tif")
 
+#5. split cgamp.rad between Canada and USA because landcover covariates need to be extracted separately
+#load cgamp.ras if need be
+cgamp.ras <- rast("gis/CGAMPV2_boundaries/CGAMPV2_rasterTemplate.tif")
+
+#load boundaries for Canada and USA
+canada <- ne_countries(scale = "large", country = "canada", returnclass = "sf") |> 
+  st_union() |> 
+  st_sf() |>
+  st_transform(crs = "ESRI:102008")
+usa <- ne_states(country = "united states of america", returnclass = "sf") %>%
+  filter(name != "Alaska" & name != "Hawaii") |>
+  st_union() |> 
+  st_sf() |> 
+  st_transform(crs = "ESRI:102008")
+plot(canada)
+plot(usa)
+
+# Convert sf objects to SpatVector before cropping
+canada_vect <- vect(canada)
+usa_vect <- vect(usa)
+
+#crop cgamp.ras with Canada
+cgamp.canada <- terra::crop(cgamp.ras, canada) |>
+  mask(mask = canada)
+#the Canadian polygon goes much further south, east, and west than I need it to, so I need to crop even further
+extent <- ext(cgamp.canada)
+new_extent <- ext(-1350000, 126000, 1025000, extent$ymax)
+cgamp.canada <- crop(cgamp.canada, new_extent)
+plot(cgamp.canada)
+
+writeRaster(cgamp.canada, "gis/CGAMPV2_boundaries/CGAMPV2_rasterTemplate_Can.tif")
+
+#crop with USA
+cgamp.usa <- terra::crop(cgamp.ras, usa) |>
+  mask(mask = usa)
+plot(cgamp.usa)
+#USA also needs a little more croping on the norther edge
+extent <- ext(cgamp.usa)
+new_extent <- ext(extent$xmin, extent$xmax, extent$ymin, 1200000)
+cgamp.usa <- crop(cgamp.usa, new_extent)
+plot(cgamp.usa)
+
+writeRaster(cgamp.usa, "gis/CGAMPV2_boundaries/CGAMPV2_rasterTemplate_USA.tif")
