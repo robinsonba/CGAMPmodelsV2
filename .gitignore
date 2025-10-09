@@ -51,3 +51,9 @@ vignettes/*.pdf
 
 # Local output folder for download from compute canada
 *output/
+
+# large covariate rasters created locally
+*Covariate_rasters/
+
+# BBS shapefiles
+*BBS/
