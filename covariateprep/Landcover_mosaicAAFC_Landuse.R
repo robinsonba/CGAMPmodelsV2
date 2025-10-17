@@ -54,9 +54,9 @@ dir.create(dest_path, showWarnings = F)
 
 #create list of years, each with a list of rasters associated with each year
 # rasterfiles <- lapply(years, FUN = function(x) {
-#   tmpList = list.files(dest_path, pattern = x, full.names = T, recursive = T) %>%
-#     keep(grepl(".tif", .)) %>% keep(nchar(.) == 68) #keep only the single .tif file for each
-#   return(lapply(tmpList, rast))
+#   tmpList = list.files(dest_path, pattern = x, full.names = T) %>%
+#     keep(grepl(".tif", .)) %>% keep(nchar(.) == 54) #keep only the single .tif file for each
+#   #return(lapply(tmpList, rast))
 # })
 
 #reproject each raster to match cgamp template raster and mosaic together
@@ -69,11 +69,12 @@ cgampCRS <- crs(cgamp)
 # 2. reproject to cgamp template
 reprojRast <- function(yyyy) {
   #1. load rasters for a given year
-  tmpList = list.files(dest_path, pattern = yyyy, full.names = T)
-  nativeRast = lapply(tmpList, rast)
+  nativeRast = list.files(dest_path, pattern = yyyy, full.names = T) %>%
+    keep(grepl(".tif", .)) %>% keep(nchar(.) == 54) %>%
+    lapply(., rast)
   #2. reproject and save. Running as a loop to save memory
   for (i in 1:length(nativeRast)) {
-    tmprast = project(x = nativeRast[[i]], y = cgampCRS, res = res(nativeRast[[i]]))
+    tmprast = project(x = nativeRast[[i]], y = cgampCRS, method = "near", res = res(nativeRast[[i]]))
     filename = paste0("gis/Covariate_rasters/Landcover/",names(nativeRast[[i]]),"_",i,".tif")
     writeRaster(tmprast, filename = filename)
     rm(tmprast)
@@ -83,7 +84,10 @@ reprojRast <- function(yyyy) {
 
 #implement function in parallel
 cl = makeCluster(length(years))
-clusterEvalQ(cl, {library(terra)})
+clusterEvalQ(cl, {
+  library(terra)
+  library(dplyr)
+  library(purrr)})
 clusterExport(cl,c("cgampCRS", "dest_path"))
 reprojList = parLapply(cl=cl, X=years, fun=reprojRast)
 stopCluster(cl)
@@ -91,7 +95,8 @@ gc()
 
 #load reprojected rasters, keeping each year as an element in a list
 reprojLU <- lapply(years, function(x) {
-  return(sprc(list.files("gis/Covariate_rasters/Landcover/", pattern = x, full.names = T)))
+  return(sprc(list.files("gis/Covariate_rasters/Landcover/", pattern = x, full.names = T) %>%
+                keep(nchar(.) == 44)))
 })
 
 #mosaic together
