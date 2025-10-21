@@ -37,7 +37,10 @@ na <- ne_countries(scale = "large", continent = "North America") |>
   st_transform(crs = "ESRI:102008")
 
 bcr.buff <- st_buffer(bcr, dist = 100*1000) |>
-  st_intersection(na)
+  st_intersection(na) %>%
+  group_by(bcr_label) %>%
+  summarise(bcr_label_name = unique(bcr_label_name),
+            geometry = st_union(SHAPE))
 plot(bcr.buff)
 
 
@@ -58,7 +61,7 @@ bcr.buff |> select(bcr_label, bcr_label_name) |>
 
 writeRaster(cgamp.ras, "gis/CGAMPV2_boundaries/CGAMPV2_rasterTemplate.tif")
 
-#5. split cgamp.rad between Canada and USA because landcover covariates need to be extracted separately
+#5. split cgamp.ras between Canada and USA because landcover covariates need to be extracted separately
 #load cgamp.ras if need be
 cgamp.ras <- rast("gis/CGAMPV2_boundaries/CGAMPV2_rasterTemplate.tif")
 
