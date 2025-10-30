@@ -102,7 +102,7 @@ reprojLU <- lapply(years, function(x) {
 #mosaic together
 mosaicRast <- lapply(reprojLU, function(x) {
   tmpmerge = terra::merge(x)
-  filename = paste0("gis/Covariate_rasters/Landcover/",substr(names(x)[1],1,6),".tif")
+  filename = paste0("gis/Covariate_rasters/Landcover/Binomial/",substr(names(x)[1],1,6),".tif")
   writeRaster(tmpmerge, filename)
   rm(tmpmerge)
   gc()
