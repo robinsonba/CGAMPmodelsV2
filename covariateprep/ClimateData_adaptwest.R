@@ -46,24 +46,19 @@ normals <- rast(paste0(exdir, "/climateNormals.tif"))
 
 #2. Annual Climate Variables #################################################################################
 #ClimateNAr requires a DEM to create rasters for annual climate variables
-#ClimateNAr needs the DEM to be in WGS84, so reprojection CGAMP template
+#DEM needs to be in WGS84, so reprojection CGAMP template
 cgamp_wgs <- project(cgamp, "EPSG:4326", method="near")
 dem <- elevatr::get_elev_raster(cgamp_wgs, z = 6)
 
-# ext_wgs <- ext(project(cgamp, y = "EPSG:4326"))
-# templateWGS <- rast(ext_wgs, res = 0.045, crs = "EPSG:4326")
-dem_wgs  <- dem |> 
+#Aggregate to ~5km resolution to save even more RAM and save raster
+dem_5km  <- dem |> 
   rast() |> #change to SpatRaster format
-  resample(y = cgamp, method = "bilinear") |> #resample to 1000m to save RAM
-  crop(y = cgamp) |>
-  mask(mask = cgamp) |>
-  aggregate(fact = 5, fun = "mean") |> # aggregate to 5km resolution to save even more RAM
-  project(y = templateWGS, method = 'bilinear') #reproject to WGS lat/long, which is required for ClimateNAr
+  aggregate(fact = 5, fun = "mean")
 demRasterName = "dem_CGAMP_wgs"
-writeRaster(dem_wgs, paste0("gis/CGAMPV2_boundaries/", demRasterName, ".tif"))
+writeRaster(dem_5km, paste0("gis/CGAMPV2_boundaries/", demRasterName, ".tif"))
 
 #remove unnecessary layers and garbage collect to save RAM
-rm(dem_wgs, dem)
+rm(dem)
 gc()
 
 #define years and variables of interest and extract
@@ -76,23 +71,24 @@ annuals <- ClimateNAr(inputFile = "gis/CGAMPV2_boundaries/dem_CGAMP_wgs.tif",
                       outDir = outDir)
 
 #Import annual climate rasters, reproject to match CGAMP, save as raster stacks for each variable
-#Some variables are associated with year of survey (y) and other the year prior (y-1). Ensure to keep separate
+#Some variables are associated with year of survey (y) and others the year prior (y-1). Ensure to keep separate
 #define y and y-1 variables
 yVar <- c("PPT_sp", "PPT_wt", "Tave_sp")
 y_1Var <- c("MSP", "Tave_sm")
 
+#extract appropriate files names and paths
 yList <- list.files(file.path(outDir, demRasterName), 
                     pattern = paste(yVar, collapse = "|"), 
                     full.names = T, 
                     recursive = T)
 
-#extract appropriate files names
+
 y_1List <- list.files(file.path(outDir, demRasterName), 
                     pattern = paste(y_1Var, collapse = "|"), 
                     full.names = T, 
                     recursive = T)
 
-#load as a list of raster stacks
+#load as a list of raster stacks stacking years within variables
 yRasters <- lapply(yVar, FUN = function(x) {
   tmpList = yList[grep(x, yList)]
   tmpYears = gsub("\\D", "", tmpList) #extract years
@@ -101,6 +97,11 @@ yRasters <- lapply(yVar, FUN = function(x) {
   return(tmpRast)
 })
 names(yRasters) <- yVar
+
+#1999 was only included to accomodate lag effect for 2000 in the y_1 rasters...remove 1999 from yRasters
+for (i in 1:length(yRasters)) {
+  yRasters[[i]] <- yRasters[[i]][[!grepl("1999", names(yRasters[[i]]))]]
+}
 
 y_1Rasters <- lapply(y_1Var, FUN = function(x) {
   tmpList = y_1List[grep(x, y_1List)]
@@ -112,15 +113,20 @@ y_1Rasters <- lapply(y_1Var, FUN = function(x) {
 })
 names(y_1Rasters) <- y_1Var
 
+#2024 needs to be removed from y_1Rasters
+for (i in 1:length(y_1Rasters)) {
+  y_1Rasters[[i]] <- y_1Rasters[[i]][[!grepl("2024", names(y_1Rasters[[i]]))]]
+}
+
 #reproject, crop, and mask to match cgamp template and save
 saveDir <- "gis/Covariate_rasters/Climate/Annuals"
+dir.create(saveDir, showWarnings = F)
 yRast_cgamp <- lapply(yVar, FUN = function(x) {
-  tmpRaster = project(yRasters[[x]][[1]], cgamp) #|>
-    # crop(y = cgamp) |>
-    # mask(mask = cgamp)
-  #writeRaster(tmpRaster, filename = file.path(saveDir, paste0(x, ".tif")))
-  #return(rast(file.path(saveDir, paste0(x, ".tif"))))
-    return(tmpRaster)
+  tmpRaster = project(yRasters[[x]], cgamp) |>
+    crop(y = cgamp) |>
+    mask(mask = cgamp)
+  writeRaster(tmpRaster, filename = file.path(saveDir, paste0(x, ".tif")))
+  return(rast(file.path(saveDir, paste0(x, ".tif"))))
 })
 
 y_1Rast_cgamp <- lapply(y_1Var, FUN = function(x) {
@@ -131,130 +137,3 @@ y_1Rast_cgamp <- lapply(y_1Var, FUN = function(x) {
   return(rast(file.path(saveDir, paste0(x, ".tif"))))
 })
 
-
-
-
-rasterList <- lapply(years, FUN = function(y) {
-  return(list.files(file.path(outDir, demRasterName, paste0("Year_", y)), full.names = T))
-})
-years <- as.character(years)
-names(rasterList) <- years
-
-#initially import as a list of lists of lists, with outer list grouping rasters together by year and inner list 
-#grouping variables together by y and y-1
-annualRasters <- lapply(years, FUN = function(x) {
-  tempFiles = rasterList[x]
-  tempRasters = lapply(tempFiles, FUN = rast)
-  names(tempRasters) = file_path_sans_ext(basename(tempFiles)) #assign raster names to elements of the list
-  yRasters = tempRasters[names(tempRasters) %in% c("PPT_sp", "PPT_wt", "Tave_sp")] #year of covariates
-  y_1Rasters = tempRasters[names(tempRasters) %in% c("MSP", "Tave_sm")] #y-1 covariates
-  output = list(yRasters, y_1Rasters)
-  names(output) = c("y", "y_1")
-  return(output)
-})
-
-
-annualRasters <- lapply(rasterList, FUN = function(x) {
-  tempRasters = lapply(x, FUN = rast)
-  names(tempRasters) = file_path_sans_ext(basename(x)) #assign raster names to elements of the list
-  yRasters = tempRasters[names(tempRasters) %in% c("PPT_sp", "PPT_wt", "Tave_sp")] #year of covariates
-  y_1Rasters = tempRasters[names(tempRasters) %in% c("MSP", "Tave_sm")] #y-1 covariates
-  output = list(yRasters, y_1Rasters)
-  names(output) = c("y", "y_1")
-  return(output)
-})
-names(annualRasters) <- years
-
-yRasters <- lapply(annualRasters, FUN = function(x) {
-  
-})
-
-test <- purrr::transpose(annualRasters)
-
-#separate variables based on those associated with year of survey (y) and those with year prior to survey (y-1)
-#y surveys = PPT_sp, PPT_wt, Tave_sp
-
-
-
-#create a function to download ready made rasters directly from ClimateNA
-download_climatena <- function(years, variables, out_dir) {
-  dir.create(out_dir, showWarnings = FALSE)
-  base_url <- "https://www.cacpd.org/CMIP6v73/annual"
-  for (yr in years) {
-    for (var in variables) {
-      url <- paste0(base_url, "/", yr, "/", var, ".asc.gz")
-      dest <- file.path(out_dir, paste0(var, "_", yr, ".asc.gz"))
-      message("Downloading: ", url)
-      try(
-        download.file(url, dest, mode = "wb"),
-        silent = TRUE
-      )
-    }
-  }
-}
-
-#define years and variables for above function
-
-download_climatena(years = years, variables = variables, out_dir = "gis/Covariate_rasters/temp")
-
-
-
-
-
-
-
-#download desired variables for years of interest.
-annuals <- downscale(
-  xyz = dem_wgs,
-  obs_years = 1999:2023,
-  gcm_hist_years = 1999:2023,
-  gcms = list_gcms(),
-  ensemble_mean = T,
-  vars = c("PPT_sp", "PPT_wt", "MSP", "Tave_sp", "Tave_sm")
-  )
-
-#Downscale observed annual data for your survey years. climr needs a point location table to extract historical values
-#it doesn't seem to work with a raster, so need to convert DEM layer to points
-pts <- as.data.frame(dem_wgs, na.rm = FALSE, xy = TRUE) %>%
-  mutate(id = row_number()) %>%
-  select(id, lon = x, lat = y, elev = file5c1461fc4a36)
-
-#define years and variables
-obs_years <- 1999:2023
-vars <- c("PPT_sp", "PPT_wt", "MSP", "Tave_sp", "Tave_sm")
-
-#extract data
-annual_obs <- downscale(
-  xyz = pts,
-  obs_years = obs_years,
-  vars = vars,
-)
-
-#Convert point data back into rasters
-raster_list <- list()
-for (v in vars) {
-  for (y in obs_years) {
-    subset_vals <- annual_obs %>%
-      filter(variable == v, year == y) %>%
-      pull(value)
-    
-    r <- dem_wgs #raster template to populate
-    r[] <- subset_vals
-    
-    # Name the layer
-    names(r) <- paste0(v, "_", y)
-    
-    # Store in list
-    raster_list[[paste0(v, "_", y)]] <- r
-  }
-}
-
-# 4️⃣ Combine all layers into a single SpatRaster stack
-annual_stack <- rast(raster_list)
-
-#reproject, crop, and mask to cgamp template and export.
-
-
-ext(yRasters[[1]])
-ext(project(yRasters[[1]], crs(cgamp)))  # transformed footprint
-ext(cgamp)
