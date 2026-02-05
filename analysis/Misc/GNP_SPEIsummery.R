@@ -21,6 +21,7 @@ fourY <- rast("gis/Covariate_rasters/SPEI/spei48May.tif")
 #put in a list
 spei <- list(spring, sumY_1, oneY, fourY)
 
+
 #load GNP boundary and reproject to SPEI projection
 gnp <- st_read("gis/CLAB_SK_2023-09-08.shp") %>%
   filter(CLAB_ID == "GRAS") %>%
@@ -59,7 +60,17 @@ speiAll <- lapply(spei, FUN = function(x) {
   return(df)
 })
 
+#create a table summarizing all SPEI metrics over time
 names(speiAll) <- c("spring", "sumY_1", "oneY", "fourY")
+
+speiTable <- lapply(names(speiAll), function(x) {
+  df = speiAll[[x]]
+  df$metric = x
+  return(df)
+}) |>
+  do.call(rbind, args = _)
+write.csv(speiTable, "GNP_spei.csv", row.names = F)
+
 #plot the results
 
 ggplot(speiAll[["spring"]], aes(x = year, y = mean)) +
